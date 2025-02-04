@@ -22,6 +22,8 @@ import (
 	"github.com/ipfs/go-cid"
 )
 
+var lastRefresh time.Time = time.Now()
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -64,7 +66,6 @@ func parseUserHandle(raw string) (*identity.Identity, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get DefaultDirectory-Lookup: %v", err)
 	}
-	fmt.Println("UserHandle: %s indentified as %s", raw, ident)
 	return ident, nil
 }
 
@@ -75,9 +76,56 @@ func authLogin(ctx context.Context, xrpc *xrpc.Client) (*comatproto.ServerCreate
 
 	auth, err := comatproto.ServerCreateSession(ctx, xrpc, &authInfo)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get ServerCreateSession_Output: %v", err)
+		return nil, fmt.Errorf("Failed to get ServerCreateSession_Output: %v - authInfo = %v", err)
 	}
 	return auth, nil
+}
+
+func refreshSession(ctx context.Context, xrpc *xrpc.Client) (*comatproto.ServerRefreshSession_Output, error) {
+
+	auth, err := comatproto.ServerRefreshSession(ctx, xrpc)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get ServerRefreshSession_Output: %v - authInfo = %v", err, xrpc)
+	}
+	return auth, nil
+}
+
+func keepAlive(ctx context.Context, xrpcc xrpc.Client) (xrpc.Client, error) {
+
+	if xrpcc.Auth == nil {
+		authData, err := authLogin(ctx, &xrpcc)
+		if err != nil {
+			return xrpcc, fmt.Errorf("authLogin Error %v", err)
+		}
+		lastRefresh = time.Now()
+		xrpcc.Auth = &xrpc.AuthInfo{
+			AccessJwt:  authData.AccessJwt,
+			RefreshJwt: authData.RefreshJwt,
+			Did:        authData.Did,
+			Handle:     authData.Handle,
+		}
+	}
+
+	timeNow := time.Now()
+	diff := timeNow.Sub(lastRefresh)
+	if diff > 1*time.Hour {
+		xrpcc.Auth.AccessJwt = xrpcc.Auth.RefreshJwt
+		authData, err := refreshSession(ctx, &xrpcc)
+		if err != nil {
+			return xrpcc, fmt.Errorf("refreshLogin Error %v", err)
+		}
+		lastRefresh = time.Now()
+		fmt.Println("Refreshed token @ : %s ", time.Now().Format(time.RFC1123))
+		xrpcc.Auth = &xrpc.AuthInfo{
+			AccessJwt:  authData.AccessJwt,
+			RefreshJwt: authData.RefreshJwt,
+			Did:        authData.Did,
+			Handle:     authData.Handle,
+		}
+	}
+
+	return xrpcc, nil
+
 }
 
 func carDownload(raw string) error {
@@ -295,16 +343,9 @@ func monitorAccMedia(raw string) error {
 	}
 
 	//LOGIN
-	authData, err := authLogin(ctx, &xrpcc)
+	xrpcc, err = keepAlive(ctx, xrpcc)
 	if err != nil {
-		return fmt.Errorf("authLogin Error %v", err)
-	}
-
-	xrpcc.Auth = &xrpc.AuthInfo{
-		AccessJwt:  authData.AccessJwt,
-		RefreshJwt: authData.RefreshJwt,
-		Did:        authData.Did,
-		Handle:     authData.Handle,
+		return fmt.Errorf("failed to execute login: %v", err)
 	}
 
 	runningMonitor := true
@@ -318,6 +359,10 @@ func monitorAccMedia(raw string) error {
 			return fmt.Errorf("failed to read processed IDs: %v", err)
 		}
 
+		xrpcc, err = keepAlive(ctx, xrpcc)
+		if err != nil {
+			return fmt.Errorf("failed to execute login: %v", err)
+		}
 		cursor := ""
 		resp, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, raw, cursor, "posts_with_media", false, 2)
 		if err != nil {

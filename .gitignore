@@ -26,6 +26,9 @@ go.work.sum
 
 /files
 processed_ids.txt
+./bsky_monitor_go
 bsky_monitor_go
-/.vscode/
+.vscode
 .vscode/launch.json
+
+vendor/

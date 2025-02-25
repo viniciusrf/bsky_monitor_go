@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
@@ -186,7 +187,7 @@ func monitorAccMedia(raw string) error {
 			return fmt.Errorf("failed to execute login: %v", err)
 		}
 		cursor := ""
-		resp, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, raw, cursor, "posts_with_media", false, 2)
+		resp, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, raw, cursor, "posts_with_media", false, 5)
 		if err != nil {
 			return err
 		}
@@ -200,10 +201,15 @@ func monitorAccMedia(raw string) error {
 					getImages(embed.EmbedImages_View.Images, post.Post.Cid, raw)
 				}
 				if embed.EmbedVideo_View != nil {
-
+					fmt.Printf("Video Found")
 				}
 				if embed.EmbedExternal_View != nil {
-
+					fmt.Printf("External Found")
+				}
+				if embed.EmbedRecordWithMedia_View != nil {
+					if embed.EmbedRecordWithMedia_View.Media.EmbedImages_View != nil {
+						getImages(embed.EmbedRecordWithMedia_View.Media.EmbedImages_View.Images, post.Post.Cid, raw)
+					}
 				}
 			}
 			err = WriteProcessedID(processedIDsFile, post.Post.Cid)
@@ -234,7 +240,7 @@ func getImages(images []*bsky.EmbedImages_ViewImage, ID string, raw string) erro
 			return fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
 		}
 
-		filePath := filepath.Join(folder, fmt.Sprintf("%s-%s-%03d.jpg", image.Alt, ID, counter))
+		filePath := filepath.Join(folder, fmt.Sprintf("%s-%s-%03d.jpg", strings.ReplaceAll(image.Alt, " ", "-"), ID, counter))
 
 		file, err := os.Create(filePath)
 		if err != nil {

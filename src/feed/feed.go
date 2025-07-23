@@ -12,17 +12,19 @@ import (
 
 func GetFeed(ctx context.Context, xrpcc *xrpc.Client, feedType, cursor, account string) (*models.FeedResponse, error) {
 	switch feedType {
-	case "nsfw":
-		return getNSFWFromTimeline(ctx, *xrpcc, cursor)
+	case "allMediaTimeline":
+		return getMediaFromTimeline(ctx, *xrpcc, cursor)
 	case "byAccount":
 		return getImageFeedFromProfile(ctx, *xrpcc, cursor, account)
+	case "nsfw":
+		return getMediaFromTimeline(ctx, *xrpcc, cursor)
 	default:
 		return nil, fmt.Errorf("unexpected feed parameter: %s", feedType)
 	}
 
 }
-func getNSFWFromTimeline(ctx context.Context, xrpcc xrpc.Client, cursor string) (*models.FeedResponse, error) {
-	responseFeed, err := bsky.FeedGetTimeline(ctx, &xrpcc, "", cursor, int64(30))
+func getMediaFromTimeline(ctx context.Context, xrpcc xrpc.Client, cursor string) (*models.FeedResponse, error) {
+	responseFeed, err := bsky.FeedGetTimeline(ctx, &xrpcc, "", cursor, int64(50))
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +36,7 @@ func getNSFWFromTimeline(ctx context.Context, xrpcc xrpc.Client, cursor string) 
 }
 
 func getImageFeedFromProfile(ctx context.Context, xrpcc xrpc.Client, cursor, account string) (*models.FeedResponse, error) {
-	responseFeed, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, account, "", "posts_with_media", false, 5)
+	responseFeed, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, account, cursor, "posts_with_media", false, 5)
 	if err != nil {
 		return nil, err
 	}

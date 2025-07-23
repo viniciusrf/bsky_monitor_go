@@ -9,10 +9,13 @@ import (
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	_ "github.com/bluesky-social/indigo/api/chat"
 	_ "github.com/bluesky-social/indigo/api/ozone"
+	"github.com/bluesky-social/indigo/atproto/identity"
+	syntax "github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/bluesky-social/indigo/xrpc"
 )
 
 var lastRefresh time.Time = time.Now()
+var Ident *identity.Identity
 
 func authLogin(ctx context.Context, xrpc *xrpc.Client) (*comatproto.ServerCreateSession_Output, error) {
 	var authInfo comatproto.ServerCreateSession_Input
@@ -21,7 +24,7 @@ func authLogin(ctx context.Context, xrpc *xrpc.Client) (*comatproto.ServerCreate
 
 	auth, err := comatproto.ServerCreateSession(ctx, xrpc, &authInfo)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get ServerCreateSession_Output: %v - authInfo = %v", err)
+		return nil, fmt.Errorf("Failed to get ServerCreateSession_Output: %v - authInfo = %v", err, xrpc)
 	}
 	return auth, nil
 }
@@ -60,7 +63,7 @@ func KeepAlive(ctx context.Context, xrpcc xrpc.Client) (xrpc.Client, error) {
 			return xrpcc, fmt.Errorf("refreshLogin Error %v", err)
 		}
 		lastRefresh = time.Now()
-		fmt.Println("Refreshed token @ : %s ", time.Now().Format(time.RFC1123))
+		fmt.Printf("Refreshed token @ : %s ", time.Now().Format(time.RFC1123))
 		xrpcc.Auth = &xrpc.AuthInfo{
 			AccessJwt:  authData.AccessJwt,
 			RefreshJwt: authData.RefreshJwt,
@@ -71,4 +74,20 @@ func KeepAlive(ctx context.Context, xrpcc xrpc.Client) (xrpc.Client, error) {
 
 	return xrpcc, nil
 
+}
+
+func ParseUserHandle(raw string) (*identity.Identity, error) {
+	ctx := context.Background()
+	atid, err := syntax.ParseAtIdentifier(raw)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get ParseAtIdentifier: %v", err)
+	}
+
+	// first look up the DID and PDS for this repo
+	dir := identity.DefaultDirectory()
+	Ident, err = dir.Lookup(ctx, *atid)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get DefaultDirectory-Lookup: %v", err)
+	}
+	return Ident, nil
 }

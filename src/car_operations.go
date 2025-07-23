@@ -14,11 +14,12 @@ import (
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/xrpc"
 	"github.com/ipfs/go-cid"
+	auth "github.com/viniciusrf/bsky_monitor_go/src/auth"
 )
 
 func carDownload(raw string) error {
 	ctx := context.Background()
-	ident, err := parseUserHandle(raw)
+	ident, err := auth.ParseUserHandle(raw)
 	if err != nil {
 		return err
 	}
@@ -116,9 +117,6 @@ func carUnpack(carPath string) error {
 		recPath := topDir + "/" + k
 		fmt.Printf("%s.json\n", recPath)
 		os.MkdirAll(filepath.Dir(recPath), os.ModePerm)
-		if err != nil {
-			return err
-		}
 		recJson, err := json.MarshalIndent(rec, "", "  ")
 		if err != nil {
 			return err

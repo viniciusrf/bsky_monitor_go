@@ -4,22 +4,23 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
-	bsky "github.com/bluesky-social/indigo/api/bsky"
 	_ "github.com/bluesky-social/indigo/api/chat"
 	_ "github.com/bluesky-social/indigo/api/ozone"
 	"github.com/bluesky-social/indigo/atproto/identity"
-	"github.com/bluesky-social/indigo/atproto/syntax"
+	syntax "github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/bluesky-social/indigo/xrpc"
+
 	auth "github.com/viniciusrf/bsky_monitor_go/src/auth"
+	embeds "github.com/viniciusrf/bsky_monitor_go/src/embeds"
+	feed "github.com/viniciusrf/bsky_monitor_go/src/feed"
 )
+
+var account string = ""
+var feedType string = ""
 
 func main() {
 	if err := run(); err != nil {
@@ -29,9 +30,10 @@ func main() {
 }
 
 func run() error {
-	account := ""
+
 	if len(os.Args) != 3 {
 		account = os.Getenv("BSKY_ACCOUNT")
+		feedType = os.Getenv("BSKY_FILTER")
 	} else {
 		account = os.Args[2]
 	}
@@ -48,7 +50,7 @@ func run() error {
 	case "download-blobs":
 		return blobDownloadAll(account)
 	case "monitor_media":
-		return monitorAccMedia(account)
+		return monitorAccMedia(account, feedType)
 	default:
 		return fmt.Errorf("unexpected command: %s", os.Args[1])
 	}
@@ -152,9 +154,9 @@ func blobDownloadAll(raw string) error {
 	return nil
 }
 
-func monitorAccMedia(raw string) error {
+func monitorAccMedia(account, feedType string) error {
 	ctx := context.Background()
-	ident, err := parseUserHandle(raw)
+	ident, err := parseUserHandle(account)
 	if err != nil {
 		return err
 	}
@@ -173,10 +175,10 @@ func monitorAccMedia(raw string) error {
 
 	runningMonitor := true
 	processedIDsFile := "processed_ids.txt"
-
+	cursor := ""
 	for runningMonitor {
 		fmt.Printf("Monitor started at %s\n", time.Now().Format(time.RFC1123))
-		//GET 3 LAST MESSAGES
+
 		processedIDs, err := ReadProcessedIDs(processedIDsFile)
 		if err != nil {
 			return fmt.Errorf("failed to read processed IDs: %v", err)
@@ -186,36 +188,22 @@ func monitorAccMedia(raw string) error {
 		if err != nil {
 			return fmt.Errorf("failed to execute login: %v", err)
 		}
-		cursor := ""
-		resp, err := bsky.FeedGetAuthorFeed(ctx, &xrpcc, raw, cursor, "posts_with_media", false, 5)
+		responseFeed, err := feed.GetFeed(ctx, &xrpcc, feedType, cursor, account)
 		if err != nil {
 			return err
 		}
-		for _, post := range resp.Feed {
+		for _, post := range responseFeed.Feed {
 			if processedIDs[post.Post.Cid] {
 				continue
 			}
+			if feedType == "nsfw" && !feed.CheckLabelsNSFW(post.Post.Labels) {
+				IdProcessed(processedIDsFile, post.Post.Cid)
+				continue
+			}
 			if post.Post.Embed != nil {
-				embed := post.Post.Embed
-				if embed.EmbedImages_View != nil {
-					getImages(embed.EmbedImages_View.Images, post.Post.Cid, raw)
-				}
-				if embed.EmbedVideo_View != nil {
-					fmt.Printf("Video Found")
-				}
-				if embed.EmbedExternal_View != nil {
-					fmt.Printf("External Found")
-				}
-				if embed.EmbedRecordWithMedia_View != nil {
-					if embed.EmbedRecordWithMedia_View.Media.EmbedImages_View != nil {
-						getImages(embed.EmbedRecordWithMedia_View.Media.EmbedImages_View.Images, post.Post.Cid, raw)
-					}
-				}
+				embeds.EmbedResolve(post, account)
 			}
-			err = WriteProcessedID(processedIDsFile, post.Post.Cid)
-			if err != nil {
-				return fmt.Errorf("failed to write processed ID: %v", err)
-			}
+			IdProcessed(processedIDsFile, post.Post.Cid)
 		}
 		time.Sleep(2 * time.Minute)
 	}
@@ -223,49 +211,19 @@ func monitorAccMedia(raw string) error {
 	return nil
 }
 
-func getImages(images []*bsky.EmbedImages_ViewImage, ID string, raw string) error {
-	for counter, image := range images {
-		folder := "files/" + raw
-		if err := os.MkdirAll(folder, os.ModePerm); err != nil {
-			return fmt.Errorf("failed to create folder: %v", err)
-		}
-
-		resp, err := http.Get(image.Fullsize)
-		if err != nil {
-			return fmt.Errorf("failed to download image: %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to download image: status code %d", resp.StatusCode)
-		}
-
-		filePath := filepath.Join(folder, fmt.Sprintf("%s-%s-%03d.jpg", strings.ReplaceAll(image.Alt, " ", "-"), ID, counter))
-
-		file, err := os.Create(filePath)
-		if err != nil {
-			return fmt.Errorf("failed to create file: %v", err)
-		}
-		defer file.Close()
-
-		_, err = io.Copy(file, resp.Body)
-		if err != nil {
-			return fmt.Errorf("failed to save image: %v", err)
-		}
-
-		fmt.Printf("Image saved: %s\n", filePath)
+func IdProcessed(processedIDsFile, postCid string) {
+	err := WriteProcessedID(processedIDsFile, postCid)
+	if err != nil {
+		fmt.Printf("failed to write processed ID: %v", err)
 	}
-	return nil
 }
 
-// ReadProcessedIDs reads the processed post IDs from a file.
 func ReadProcessedIDs(filename string) (map[string]bool, error) {
 	processedIDs := make(map[string]bool)
 
 	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// If the file doesn't exist, return an empty map
 			return processedIDs, nil
 		}
 		return nil, fmt.Errorf("failed to open file: %v", err)

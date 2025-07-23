@@ -13,9 +13,9 @@ import (
 	auth "github.com/viniciusrf/bsky_monitor_go/src/auth"
 )
 
-func BlobList(raw string) error {
+func BlobList(account string) error {
 	ctx := context.Background()
-	ident, err := auth.ParseUserHandle(raw)
+	ident, err := auth.ParseUserHandle(account)
 	if err != nil {
 		return err
 	}
@@ -46,9 +46,9 @@ func BlobList(raw string) error {
 	return nil
 }
 
-func BlobDownloadAll(raw string) error {
+func BlobDownloadAll(account string) error {
 	ctx := context.Background()
-	ident, err := auth.ParseUserHandle(raw)
+	ident, err := auth.ParseUserHandle(account)
 	if err != nil {
 		return err
 	}

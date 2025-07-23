@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
+	bsky "github.com/bluesky-social/indigo/api/bsky"
 	_ "github.com/bluesky-social/indigo/api/chat"
 	_ "github.com/bluesky-social/indigo/api/ozone"
 	"github.com/bluesky-social/indigo/xrpc"
@@ -20,7 +22,7 @@ import (
 var (
 	account  string
 	feedType string
-	apiPort  int = 8080
+	user     string
 )
 
 // implementing cursor position
@@ -36,6 +38,7 @@ func run() error {
 
 	if len(os.Args) != 3 {
 		account = os.Getenv("BSKY_ACCOUNT")
+		user = os.Getenv("BSKY_USER")
 		feedType = os.Getenv("BSKY_FILTER")
 	} else {
 		account = os.Args[2]
@@ -84,6 +87,11 @@ func monitorAccMedia(account, feedType string) error {
 	processedIDsFile := "processed_ids.txt"
 	cursor := ""
 	fmt.Printf("Monitor started at %s\n", time.Now().Format(time.RFC1123))
+
+	var wg sync.WaitGroup
+	maxConcurrent := 5
+	semaphore := make(chan struct{}, maxConcurrent)
+
 	for runningMonitor {
 
 		processedIDs, err := ReadProcessedIDs(processedIDsFile)
@@ -108,7 +116,16 @@ func monitorAccMedia(account, feedType string) error {
 				continue
 			}
 			if post.Post.Embed != nil {
-				media.EmbedResolve(post, account)
+				wg.Add(1)
+				semaphore <- struct{}{}
+				go func(p *bsky.FeedDefs_FeedViewPost, acc string) {
+					defer wg.Done()
+					defer func() { <-semaphore }()
+
+					media.EmbedResolve(p, acc)
+
+					IdProcessed(processedIDsFile, p.Post.Cid)
+				}(post, account)
 			}
 			IdProcessed(processedIDsFile, post.Post.Cid)
 		}

@@ -76,9 +76,9 @@ func KeepAlive(ctx context.Context, xrpcc xrpc.Client) (xrpc.Client, error) {
 
 }
 
-func ParseUserHandle(raw string) (*identity.Identity, error) {
+func ParseUserHandle(account string) (*identity.Identity, error) {
 	ctx := context.Background()
-	atid, err := syntax.ParseAtIdentifier(raw)
+	atid, err := syntax.ParseAtIdentifier(account)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get ParseAtIdentifier: %v", err)
 	}
